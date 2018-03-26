@@ -1,0 +1,13 @@
+# https://github.com/realm/SwiftLint
+included:
+  - Sources
+  - Tests
+type_name:
+  min_length: 2
+identifier_name:
+  min_length:
+    warning: 2
+line_length: 180
+disabled_rules:
+  - control_statement
+  - unused_closure_parameter
