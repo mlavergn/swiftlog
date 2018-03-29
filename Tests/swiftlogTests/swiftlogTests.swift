@@ -3,6 +3,8 @@ import XCTest
 
 class SwiftLogTests: XCTestCase {
     func testExample() {
+		Log.configure(level: .ALL)
+		Log.debug("hello")
         XCTAssertEqual("test", "test")
     }
 

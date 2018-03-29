@@ -52,7 +52,6 @@ public enum LogDestination: Int {
 	case STDERR
 	case FILE
 	case SYSTEM
-	case OSLOG
 }
 
 public struct Log {
@@ -63,7 +62,7 @@ public struct Log {
 	public static var logDestination: LogDestination = LogDestination.STDOUT
 
 	/// os_log logger
-	public static var logger = OSLog.default
+	public static var logger: OSLog?
 
 	/// Timer singleton for performance measurement
 	public static var timeMark: DispatchTime?
@@ -79,7 +78,7 @@ public struct Log {
 
 		// experimental support for os_log
 		if #available(macOS 10.12, *) {
-			if destination == .OSLOG {
+			if destination == .SYSTEM {
 				if subssystem != nil && category != nil {
 					logger = OSLog(subsystem: subssystem!, category: category!)
 				}
@@ -110,35 +109,73 @@ public struct Log {
 		}
 	}
 
+	public static var pathURL: URL {
+		if #available(iOS 10.0, macOS 10.12, tvOS 10.0, watchOS 3.0, *) {
+		#if os(iOS) || os(tvOS)
+			var pathURL = URL(fileURLWithPath: NSHomeDirectory())
+		#else
+			var pathURL = FileManager.default.homeDirectoryForCurrentUser
+		#endif
+			pathURL = pathURL.appendingPathComponent("log/swift")
+
+			do {
+				try FileManager.default.createDirectory(atPath: pathURL.path, withIntermediateDirectories: true, attributes: nil)
+			} catch let error as NSError {
+				fputs("\(Date.timeIntervalSinceReferenceDate) Log.pathURL failed: \(error)\n", __stderrp)
+			}
+
+			return pathURL
+		} else {
+			return URL(fileURLWithPath: "/tmp")
+		}
+	}
+
+	@inline(__always) public static func logLevelToOSLogType(level: LogLevel) -> OSLogType {
+		if #available(macOS 10.12, *) {
+			var oslogType: OSLogType = .debug
+			switch level {
+			case .DEBUG:
+				oslogType = .debug
+			case .INFO:
+				oslogType = .info
+			case .WARN:
+				oslogType = .default
+			case .ERROR:
+				oslogType = .error
+			case .FATAL:
+				oslogType = .fault
+			default:
+				oslogType = .debug
+			}
+
+			return oslogType
+		}
+
+		return OSLogType(0)
+	}
+
 	/// Outputs a log message to the set destination
 	///
 	/// - Parameter message: description as a String
 	@inline(__always) public static func output(level: LogLevel, file: String, function: String, line: Int, message: String) {
+		let fileName = (file as NSString).lastPathComponent
+
 		switch logDestination {
+		case .STDOUT:
+			fputs("\(Date.timeIntervalSinceReferenceDate) [\(fileName).\(function):\(line)] \(message)\n", __stdoutp)
 		case .STDERR:
-			fputs("\(message)\n", __stderrp)
-		case .OSLOG:
+			fputs("\(Date.timeIntervalSinceReferenceDate) [\(fileName).\(function):\(line)] \(message)\n", __stderrp)
+		case .SYSTEM:
 			if #available(macOS 10.12, *) {
-				var oslogType: OSLogType = .debug
-				switch level {
-				case .DEBUG:
-					oslogType = .debug
-				case .INFO:
-					oslogType = .info
-				case .WARN:
-					oslogType = .default
-				case .ERROR:
-					oslogType = .error
-				case .FATAL:
-					oslogType = .fault
-				default:
-					oslogType = .debug
-				}
-				os_log("[%{public}@.%{public}@:%{public}d] %{public}@", log: logger, type: oslogType, #file, #function, #line, message)
+				let oslogType = logLevelToOSLogType(level: level)
+				os_log("[%{public}@.%{public}@:%{public}d] %{public}@", log: logger ?? .default, type: oslogType, fileName, function, line, message)
 			}
-		default:
-			print(message)
-		// - todo: implemement the other destinations
+		case .FILE:
+			do {
+				try "\(Date.timeIntervalSinceReferenceDate) [\(fileName).\(function):\(line)] \(message)\n".write(to: pathURL, atomically: false, encoding: String.Encoding.utf8)
+			} catch let error as NSError {
+				fputs("\(Date.timeIntervalSinceReferenceDate) file write failed [\(fileName).\(function):\(line)] \(error)\n", __stderrp)
+			}
 		}
 	}
 
